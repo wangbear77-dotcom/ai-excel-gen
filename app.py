@@ -91,7 +91,7 @@ def generate_and_fix_code(user_prompt, key, model_name):
         safety_settings = {HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE, HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE, HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE, HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE}
         model = genai.GenerativeModel(model_name, generation_config=genai.types.GenerationConfig(max_output_tokens=8000, temperature=0.0)) 
         
-        # 🔥 V5.7 核心 Prompt 優化
+        # 🔥 V5.7 核心修正：加強公式寫法的 Prompt
         base_prompt = f"""
         你是一位 Python Excel 自動化專家。需求："{user_prompt}"
         請寫一段 **完整且可執行** 的 Python 代碼。
@@ -142,7 +142,6 @@ def generate_and_fix_code(user_prompt, key, model_name):
         return None, str(e)
 
 # --- 5. 主介面 ---
-# 🔥 好壞範例在這裡！確認無誤
 with st.expander("💡 怎麼樣才能做出完美的表格？ (點我看秘訣)"):
     st.markdown("""
     **黃金許願公式：**
@@ -190,4 +189,4 @@ if st.button("✨ 生成專業表格", type="primary", disabled=not can_generate
 
 # --- 6. 頁尾 ---
 st.divider()
-st.caption("Excel Generator V5.7 (Final Check)")
+st.caption("Excel Generator V5.7 (Formula Auto-Fix)")
