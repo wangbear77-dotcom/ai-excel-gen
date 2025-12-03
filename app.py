@@ -6,7 +6,7 @@ import io
 import random
 import datetime
 import traceback
-import re # 引入正規表達式來清洗代碼
+import re
 
 # 預先檢查環境
 try:
@@ -20,55 +20,79 @@ except ImportError:
 # --- 1. 頁面設定 ---
 st.set_page_config(page_title="專業 Excel 生成器", page_icon="📊", layout="centered")
 
+# 初始化 Session State
 if 'user_prompt' not in st.session_state:
     st.session_state['user_prompt'] = ''
+if 'usage_count' not in st.session_state:
+    st.session_state['usage_count'] = 0
+if 'is_pro' not in st.session_state:
+    st.session_state['is_pro'] = False
 
 # --- 2. 標題 ---
 st.title("📊 AI Excel 專業生成器")
-st.markdown("專為 Excel 小白設計的救星！內建 **AI 自我修復機制**，大幅降低出錯率。")
+st.markdown("專為 Excel 小白設計的救星！AI 自動幫你生成 **含公式、已排版、專業配色** 的 Excel 表格。")
 
-# --- 3. 側邊欄 ---
+# --- 3. 側邊欄：商業邏輯 (隱藏 Key + 收費牆) ---
 with st.sidebar:
-    st.header("🔑 啟動金鑰")
-    api_key = None
+    st.header("⚙️ 設定與權限")
+    
+    # [A] 隱藏式 API Key (優先讀取 Secrets)
+    sys_api_key = None
     try:
         if "GEMINI_API_KEY" in st.secrets:
-            api_key = st.secrets["GEMINI_API_KEY"]
-            st.success("✅ 已連接內建金鑰")
-    except: pass
+            sys_api_key = st.secrets["GEMINI_API_KEY"]
+            # st.success("✅ 系統已就緒") # 用戶無感連線
+    except:
+        pass
 
-    if not api_key:
-        api_key = st.text_input("請在此輸入 Gemini API Key", type="password", placeholder="AIzaSy...")
-        with st.expander("❓ 如何免費獲取 API Key？"):
-            st.markdown("[👉 點此前往 Google AI Studio](https://aistudio.google.com/app/apikey)")
-    
+    # 如果後台沒設定(本機測試)，才顯示輸入框
+    if not sys_api_key:
+        sys_api_key = st.text_input("開發者專用 Key (用戶看不到)", type="password")
+        if not sys_api_key:
+            st.warning("⚠️ 系統維護中 (未設定後台金鑰)")
+
+    st.divider()
+
+    # [B] 收費牆邏輯
+    if st.session_state['is_pro']:
+        st.success("💎 PRO 版功能已解鎖 (無限使用)")
+    else:
+        remaining = 3 - st.session_state['usage_count']
+        st.info(f"✨ 免費額度：剩餘 **{remaining}** 次")
+        st.progress(st.session_state['usage_count'] / 3)
+        
+        if remaining == 0:
+            st.error("🔒 額度已用完，請解鎖")
+        
+        with st.expander("🔓 輸入序號解鎖 PRO 版"):
+            license_key = st.text_input("請輸入產品序號", type="password")
+            if st.button("驗證序號"):
+                if license_key == "VIP888": 
+                    st.session_state['is_pro'] = True
+                    st.rerun()
+                else:
+                    st.error("序號錯誤")
+            st.markdown("👉 **[點此購買序號 ($5)](https://gumroad.com)**")
+
     st.divider()
     
-    # ⚡ 懶人樣板按鈕
+    # [C] 懶人樣板
     st.write("⚡ **快速樣板 (點擊自動填寫)：**")
     if st.button("💰 個人記帳表"): st.session_state['user_prompt'] = "幫我做一個2025年個人記帳表。欄位：日期、類別、項目、金額、付款方式。請生成10筆範例。公式要求：計算本月總支出、分類小計。美化：標題深藍底白字，金額加$符號。"
     if st.button("📦 商品庫存表"): st.session_state['user_prompt'] = "幫我做一個庫存管理表。欄位：商品編號、名稱、進貨價、售價、庫存量、庫存總值(公式：進貨價*庫存量)。請生成10筆範例。美化：標題深綠底，金額加千分位。"
     if st.button("🛒 網拍訂單表"): st.session_state['user_prompt'] = "幫我做一個電商訂單管理表。欄位：訂單編號、平台(蝦皮/官網)、商品、單價、數量、手續費(蝦皮8%/官網2%)、實收金額。請生成10筆。公式要求：用IF判斷手續費，退貨實收為0。美化：標題亮橘底。"
 
-    st.divider()
     model_choice = st.selectbox("模型選擇", ["gemini-2.5-flash", "gemini-2.5-pro"])
 
-# --- 4. 核心邏輯：暴力清洗 + 自我修復 ---
+# --- 4. 核心邏輯：V4.7 的暴力清洗 + 自我修復 ---
 def sanitize_code(code):
-    """
-    🔥 V4.7 新增：暴力清洗函數
-    強制刪除 AI 寫出的錯誤模組引用，防止 ModuleNotFoundError
-    """
+    """暴力清洗：強制刪除 AI 寫出的錯誤模組引用"""
     lines = code.split('\n')
     cleaned_lines = []
     for line in lines:
-        # 如果這一行包含被禁用的模組，直接丟棄
-        if "openpyxl.worksheet.conditional_formatting" in line:
-            continue
-        if "openpyxl.formatting.rule" in line:
-            continue
-        if "FormulaRule" in line:
-            continue
+        if "openpyxl.worksheet.conditional_formatting" in line: continue
+        if "openpyxl.formatting.rule" in line: continue
+        if "FormulaRule" in line: continue
         cleaned_lines.append(line)
     return '\n'.join(cleaned_lines)
 
@@ -94,15 +118,15 @@ def generate_and_fix_code(user_prompt, key, model_name):
         
         base_prompt = f"""
         你是一位 Python Excel 自動化專家。需求："{user_prompt}"
-        請寫一段 **完整且可執行** 的 Python 代碼來生成 `output.xlsx`。
+        請寫一段 **完整且可執行** 的 Python 代碼。
         
         【嚴格代碼規範】：
-        1. **Imports**：務必包含 random, datetime, pandas, openpyxl 相關模組。
-        2. **樣式定義**：定義 thin_border, header_fill, header_font。
-        3. **數據與公式**：寫入數據與 Excel 公式。
-           - 嚴禁在 f-string 中寫入複雜巢狀公式，請拆成變數拼接。
-        4. **自動調整欄寬**：使用標準迴圈邏輯調整。
-        5. **禁止事項**：只輸出 Python 代碼，不要 markdown。不要使用 openpyxl.formatting 或 conditional_formatting。
+        1. **Imports**：務必包含 io, random, datetime, pandas, openpyxl 相關模組。
+        2. **核心邏輯**：建立 wb = Workbook()，填入資料與公式，美化樣式。
+        3. **公式寫法**：嚴禁在 f-string 中寫入複雜巢狀公式，請拆成變數拼接。
+        4. **禁止模組**：不要使用 openpyxl.formatting 或 conditional_formatting (請用迴圈變色)。
+        5. **關鍵步驟**：最後請將檔案儲存到變數 `output_buffer = io.BytesIO()`，並 `wb.save(output_buffer)`。
+        6. **禁止事項**：只輸出 Python 代碼，不要 markdown。
         """
         
         current_prompt = base_prompt
@@ -112,7 +136,7 @@ def generate_and_fix_code(user_prompt, key, model_name):
             response = model.generate_content(current_prompt, safety_settings=safety_settings)
             
             if not response.parts:
-                return None, f"AI 拒絕生成 (Finish Reason: {response.candidates[0].finish_reason})。可能觸發了安全機制。"
+                return None, f"AI 拒絕生成 (Finish Reason: {response.candidates[0].finish_reason})。"
                 
             raw_code = response.text
             clean_code = raw_code.replace("```python", "").replace("```", "").strip()
@@ -120,19 +144,24 @@ def generate_and_fix_code(user_prompt, key, model_name):
                  import_pos = clean_code.find("import")
                  if import_pos != -1: clean_code = clean_code[import_pos:]
             
-            # 🔥 執行暴力清洗
+            # 執行暴力清洗
             clean_code = sanitize_code(clean_code)
 
             try:
                 # 自我修復測試
                 test_vars = {}
                 exec(clean_code, globals(), test_vars)
-                return clean_code, None
+                
+                # 確認有產出 buffer
+                if 'output_buffer' in test_vars:
+                    return clean_code, None
+                else:
+                    raise Exception("代碼執行成功但未產生 output_buffer 變數")
+                    
             except Exception as e:
                 error_msg = str(e)
                 print(f"第 {attempt+1} 次嘗試失敗: {error_msg}")
-                # 將錯誤回報給 AI，請它修正
-                current_prompt += f"\n\n\n【系統回報】：程式碼執行失敗，錯誤訊息：{error_msg}。\n請修正代碼(不要使用 conditional_formatting)並重新輸出。"
+                current_prompt += f"\n\n\n【系統回報】：程式碼執行失敗，錯誤訊息：{error_msg}。\n請修正代碼(確保寫入output_buffer)並重新輸出。"
                 
         return None, "AI 嘗試修復了 3 次但仍然失敗，請嘗試簡化您的需求。"
         
@@ -141,6 +170,7 @@ def generate_and_fix_code(user_prompt, key, model_name):
 
 # --- 5. 主介面 ---
 
+# 🔥 好壞範例教學 (完整保留！)
 with st.expander("💡 怎麼樣才能做出完美的表格？ (點我看秘訣)"):
     st.markdown("""
     **黃金許願公式：**
@@ -160,16 +190,25 @@ with st.expander("💡 怎麼樣才能做出完美的表格？ (點我看秘訣)
 # 使用 session_state 綁定輸入框
 user_input = st.text_area("請輸入需求 (或點擊左側快速樣板)：", value=st.session_state['user_prompt'], height=150, placeholder="例如：幫我做一個房東收租表...")
 
-if st.button("✨ 生成專業表格 (自動修復模式)", type="primary"):
-    if not api_key:
-        st.error("❌ 請先輸入 API Key")
+# 🔥 判斷是否允許生成
+can_generate = False
+if sys_api_key:
+    if st.session_state['is_pro'] or st.session_state['usage_count'] < 3:
+        can_generate = True
+
+if st.button("✨ 生成專業表格", type="primary", disabled=not can_generate):
+    if not can_generate:
+        if not sys_api_key:
+            st.error("⚠️ 系統維護中 (未設定後台金鑰)")
+        else:
+            st.error("🔒 免費試用次數已用完！請在左側輸入序號解鎖。")
     elif not user_input:
         st.warning("⚠️ 請輸入需求")
     else:
-        spinner_text = f"🤖 AI 正在製作中 (已啟動暴力清洗修復)..."
+        spinner_text = f"🤖 AI 正在製作中 (已啟動自我修復)..."
         with st.spinner(spinner_text):
             
-            code, error_msg = generate_and_fix_code(user_input, api_key, model_choice)
+            code, error_msg = generate_and_fix_code(user_input, sys_api_key, model_choice)
             
             if code:
                 try:
@@ -178,7 +217,6 @@ if st.button("✨ 生成專業表格 (自動修復模式)", type="primary"):
                     
                     if 'output_buffer' in local_vars:
                         excel_data = local_vars['output_buffer']
-                        # 檔名加上時間戳記
                         file_name = f"excel_gen_{datetime.datetime.now().strftime('%H%M%S')}.xlsx"
                         
                         st.download_button(
@@ -188,20 +226,14 @@ if st.button("✨ 生成專業表格 (自動修復模式)", type="primary"):
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                         )
                         st.success("🎉 完成！(AI 確保了代碼無誤)")
+                        
+                        # 🔥 扣除次數 (如果是免費版)
+                        if not st.session_state['is_pro']:
+                            st.session_state['usage_count'] += 1
+                            st.rerun() # 重新整理頁面以更新次數顯示
+                            
                     else:
-                        # 萬一 AI 這次沒有用 buffer，嘗試讀取檔案
-                        try:
-                            with open("output.xlsx", "rb") as f:
-                                st.download_button(
-                                    label="📥 下載 Excel (.xlsx)",
-                                    data=f,
-                                    file_name="professional_excel.xlsx",
-                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                                )
-                            st.success("🎉 完成！")
-                        except:
-                            st.error("生成失敗：找不到檔案。")
-
+                        st.error("生成失敗。")
                 except Exception as e:
                     st.error(f"未知錯誤：{e}")
                     with st.expander("查看代碼"):
@@ -212,4 +244,4 @@ if st.button("✨ 生成專業表格 (自動修復模式)", type="primary"):
 
 # --- 6. 頁尾 ---
 st.divider()
-st.caption("Excel Generator V4.7 (Code Sanitizer + Self-Healing)")
+st.caption("Excel Generator V5.5 (Commercial Edition)")
