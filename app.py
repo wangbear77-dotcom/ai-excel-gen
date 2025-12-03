@@ -41,7 +41,6 @@ with st.sidebar:
     try:
         if "GEMINI_API_KEY" in st.secrets:
             sys_api_key = st.secrets["GEMINI_API_KEY"]
-            # st.success("✅ 系統已就緒") # 用戶無感連線
     except:
         pass
 
@@ -84,7 +83,7 @@ with st.sidebar:
 
     model_choice = st.selectbox("模型選擇", ["gemini-2.5-flash", "gemini-2.5-pro"])
 
-# --- 4. 核心邏輯：V4.7 的暴力清洗 + 自我修復 ---
+# --- 4. 核心邏輯：暴力清洗 + 自我修復 ---
 def sanitize_code(code):
     """暴力清洗：強制刪除 AI 寫出的錯誤模組引用"""
     lines = code.split('\n')
@@ -170,7 +169,7 @@ def generate_and_fix_code(user_prompt, key, model_name):
 
 # --- 5. 主介面 ---
 
-# 🔥 好壞範例教學 (完整保留！)
+# 🔥🔥🔥 V5.6 保證：好壞範例教學完整保留！🔥🔥🔥
 with st.expander("💡 怎麼樣才能做出完美的表格？ (點我看秘訣)"):
     st.markdown("""
     **黃金許願公式：**
@@ -227,10 +226,11 @@ if st.button("✨ 生成專業表格", type="primary", disabled=not can_generate
                         )
                         st.success("🎉 完成！(AI 確保了代碼無誤)")
                         
-                        # 🔥 扣除次數 (如果是免費版)
+                        # 🔥 V5.6 修正：移除 st.rerun()，改用文字提示
                         if not st.session_state['is_pro']:
                             st.session_state['usage_count'] += 1
-                            st.rerun() # 重新整理頁面以更新次數顯示
+                            used = st.session_state['usage_count']
+                            st.info(f"✨ 已扣除 1 次額度 (目前使用 {used}/3 次)")
                             
                     else:
                         st.error("生成失敗。")
@@ -244,4 +244,4 @@ if st.button("✨ 生成專業表格", type="primary", disabled=not can_generate
 
 # --- 6. 頁尾 ---
 st.divider()
-st.caption("Excel Generator V5.5 (Commercial Edition)")
+st.caption("Excel Generator V5.6 (Fixed Download Button)")
