@@ -6,6 +6,7 @@ import io
 import random
 import datetime
 import traceback
+import re # 引入正規表達式來清洗代碼
 
 # 預先檢查環境
 try:
@@ -43,7 +44,7 @@ with st.sidebar:
     
     st.divider()
     
-    # ⚡ 懶人樣板按鈕 (都在！)
+    # ⚡ 懶人樣板按鈕
     st.write("⚡ **快速樣板 (點擊自動填寫)：**")
     if st.button("💰 個人記帳表"): st.session_state['user_prompt'] = "幫我做一個2025年個人記帳表。欄位：日期、類別、項目、金額、付款方式。請生成10筆範例。公式要求：計算本月總支出、分類小計。美化：標題深藍底白字，金額加$符號。"
     if st.button("📦 商品庫存表"): st.session_state['user_prompt'] = "幫我做一個庫存管理表。欄位：商品編號、名稱、進貨價、售價、庫存量、庫存總值(公式：進貨價*庫存量)。請生成10筆範例。美化：標題深綠底，金額加千分位。"
@@ -52,8 +53,26 @@ with st.sidebar:
     st.divider()
     model_choice = st.selectbox("模型選擇", ["gemini-2.5-flash", "gemini-2.5-pro"])
 
-# --- 4. 核心邏輯：記憶體直出 + 安全解鎖 + 自我修復 ---
-def generate_excel_buffer(user_prompt, key, model_name):
+# --- 4. 核心邏輯：暴力清洗 + 自我修復 ---
+def sanitize_code(code):
+    """
+    🔥 V4.7 新增：暴力清洗函數
+    強制刪除 AI 寫出的錯誤模組引用，防止 ModuleNotFoundError
+    """
+    lines = code.split('\n')
+    cleaned_lines = []
+    for line in lines:
+        # 如果這一行包含被禁用的模組，直接丟棄
+        if "openpyxl.worksheet.conditional_formatting" in line:
+            continue
+        if "openpyxl.formatting.rule" in line:
+            continue
+        if "FormulaRule" in line:
+            continue
+        cleaned_lines.append(line)
+    return '\n'.join(cleaned_lines)
+
+def generate_and_fix_code(user_prompt, key, model_name):
     try:
         genai.configure(api_key=key)
         
@@ -75,24 +94,15 @@ def generate_excel_buffer(user_prompt, key, model_name):
         
         base_prompt = f"""
         你是一位 Python Excel 自動化專家。需求："{user_prompt}"
-        
-        請寫一段 **完整且可執行** 的 Python 代碼。
+        請寫一段 **完整且可執行** 的 Python 代碼來生成 `output.xlsx`。
         
         【嚴格代碼規範】：
-        1. **Imports**：務必包含 `io`, `random`, `datetime`, `pandas` 以及 `openpyxl` 相關模組。
-        2. **核心邏輯**：
-           - 建立 `wb = Workbook()`
-           - 填入資料與公式。
-           - 進行美化 (樣式定義)。
-           - **關鍵步驟 (OUTPUT)**：
-             最後請將檔案儲存到變數 `output_buffer` 中，不要存成檔案！
-             範例：
-             ```python
-             output_buffer = io.BytesIO()
-             wb.save(output_buffer)
-             output_buffer.seek(0)
-             ```
-        3. **禁止事項**：不要使用 `wb.save('file.xlsx')`。只輸出 Python 代碼。不要使用 openpyxl.formatting。
+        1. **Imports**：務必包含 random, datetime, pandas, openpyxl 相關模組。
+        2. **樣式定義**：定義 thin_border, header_fill, header_font。
+        3. **數據與公式**：寫入數據與 Excel 公式。
+           - 嚴禁在 f-string 中寫入複雜巢狀公式，請拆成變數拼接。
+        4. **自動調整欄寬**：使用標準迴圈邏輯調整。
+        5. **禁止事項**：只輸出 Python 代碼，不要 markdown。不要使用 openpyxl.formatting 或 conditional_formatting。
         """
         
         current_prompt = base_prompt
@@ -102,7 +112,7 @@ def generate_excel_buffer(user_prompt, key, model_name):
             response = model.generate_content(current_prompt, safety_settings=safety_settings)
             
             if not response.parts:
-                return None, f"AI 拒絕生成 (Finish Reason: {response.candidates[0].finish_reason})。"
+                return None, f"AI 拒絕生成 (Finish Reason: {response.candidates[0].finish_reason})。可能觸發了安全機制。"
                 
             raw_code = response.text
             clean_code = raw_code.replace("```python", "").replace("```", "").strip()
@@ -110,21 +120,19 @@ def generate_excel_buffer(user_prompt, key, model_name):
                  import_pos = clean_code.find("import")
                  if import_pos != -1: clean_code = clean_code[import_pos:]
             
+            # 🔥 執行暴力清洗
+            clean_code = sanitize_code(clean_code)
+
             try:
-                # 測試執行
+                # 自我修復測試
                 test_vars = {}
                 exec(clean_code, globals(), test_vars)
-                
-                # 確認有產出 buffer
-                if 'output_buffer' in test_vars:
-                    return clean_code, None
-                else:
-                    raise Exception("代碼執行成功但未產生 output_buffer 變數")
-                    
+                return clean_code, None
             except Exception as e:
                 error_msg = str(e)
                 print(f"第 {attempt+1} 次嘗試失敗: {error_msg}")
-                current_prompt += f"\n\n\n【系統回報】：錯誤訊息為：{error_msg}。\n請修正代碼，確保最後將結果存入 `output_buffer = io.BytesIO()`。"
+                # 將錯誤回報給 AI，請它修正
+                current_prompt += f"\n\n\n【系統回報】：程式碼執行失敗，錯誤訊息：{error_msg}。\n請修正代碼(不要使用 conditional_formatting)並重新輸出。"
                 
         return None, "AI 嘗試修復了 3 次但仍然失敗，請嘗試簡化您的需求。"
         
@@ -133,7 +141,6 @@ def generate_excel_buffer(user_prompt, key, model_name):
 
 # --- 5. 主介面 ---
 
-# 🔥 V4.6 保證：好壞範例教學完整保留！
 with st.expander("💡 怎麼樣才能做出完美的表格？ (點我看秘訣)"):
     st.markdown("""
     **黃金許願公式：**
@@ -159,29 +166,42 @@ if st.button("✨ 生成專業表格 (自動修復模式)", type="primary"):
     elif not user_input:
         st.warning("⚠️ 請輸入需求")
     else:
-        spinner_text = f"🤖 AI 正在製作中 (已解除安全限制)..."
+        spinner_text = f"🤖 AI 正在製作中 (已啟動暴力清洗修復)..."
         with st.spinner(spinner_text):
             
-            # 1. 獲取代碼
-            code, error_msg = generate_excel_buffer(user_input, api_key, model_choice)
+            code, error_msg = generate_and_fix_code(user_input, api_key, model_choice)
             
             if code:
                 try:
-                    # 2. 正式執行
                     local_vars = {}
                     exec(code, globals(), local_vars)
                     
                     if 'output_buffer' in local_vars:
                         excel_data = local_vars['output_buffer']
+                        # 檔名加上時間戳記
+                        file_name = f"excel_gen_{datetime.datetime.now().strftime('%H%M%S')}.xlsx"
                         
                         st.download_button(
                             label="📥 下載 Excel (.xlsx)",
                             data=excel_data,
-                            file_name=f"excel_gen_{datetime.datetime.now().strftime('%H%M%S')}.xlsx",
+                            file_name=file_name,
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                         )
-                        st.success("🎉 完成！這是全新生成的資料。")
-                    
+                        st.success("🎉 完成！(AI 確保了代碼無誤)")
+                    else:
+                        # 萬一 AI 這次沒有用 buffer，嘗試讀取檔案
+                        try:
+                            with open("output.xlsx", "rb") as f:
+                                st.download_button(
+                                    label="📥 下載 Excel (.xlsx)",
+                                    data=f,
+                                    file_name="professional_excel.xlsx",
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                )
+                            st.success("🎉 完成！")
+                        except:
+                            st.error("生成失敗：找不到檔案。")
+
                 except Exception as e:
                     st.error(f"未知錯誤：{e}")
                     with st.expander("查看代碼"):
@@ -192,4 +212,4 @@ if st.button("✨ 生成專業表格 (自動修復模式)", type="primary"):
 
 # --- 6. 頁尾 ---
 st.divider()
-st.caption("Excel Generator V4.6 (The Real Ultimate Ver.)")
+st.caption("Excel Generator V4.7 (Code Sanitizer + Self-Healing)")
