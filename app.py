@@ -35,9 +35,11 @@ with st.sidebar:
     # [A] 隱藏式 API Key (優先讀取 Secrets)
     sys_api_key = None
     try:
-        if "GEMINI_API_KEY" in st.secrets:
-            sys_api_key = st.secrets["GEMINI_API_KEY"]
-            st.success("✅ 系統已就緒 (無限暢用模式)")
+        # 🔥 輪詢邏輯：從列表裡隨機抽一把鑰匙
+        if "API_KEYS" in st.secrets:
+            key_list = st.secrets["API_KEYS"]
+            sys_api_key = random.choice(key_list)
+            # st.success(f"✅ 系統已就緒 (Key池: {len(key_list)})") 
     except:
         pass
 
@@ -226,3 +228,4 @@ if st.button("✨ 生成專業表格", type="primary", disabled=not can_generate
 # --- 6. 頁尾 ---
 st.divider()
 st.caption("Excel Generator V6.0 (Donation Model)")
+
