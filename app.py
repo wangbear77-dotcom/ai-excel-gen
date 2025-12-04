@@ -23,16 +23,12 @@ st.set_page_config(page_title="專業 Excel 生成器", page_icon="📊", layout
 # 初始化 Session State
 if 'user_prompt' not in st.session_state:
     st.session_state['user_prompt'] = ''
-if 'usage_count' not in st.session_state:
-    st.session_state['usage_count'] = 0
-if 'is_pro' not in st.session_state:
-    st.session_state['is_pro'] = False
 
 # --- 2. 標題 ---
 st.title("📊 AI Excel 專業生成器")
 st.markdown("專為 Excel 小白設計的救星！AI 自動幫你生成 **含公式、已排版、專業配色** 的 Excel 表格。")
 
-# --- 3. 側邊欄：商業邏輯 (隱藏 Key + 收費牆) ---
+# --- 3. 側邊欄：設定與打賞 ---
 with st.sidebar:
     st.header("⚙️ 設定與權限")
     
@@ -41,6 +37,7 @@ with st.sidebar:
     try:
         if "GEMINI_API_KEY" in st.secrets:
             sys_api_key = st.secrets["GEMINI_API_KEY"]
+            st.success("✅ 系統已就緒 (無限暢用模式)")
     except:
         pass
 
@@ -52,30 +49,24 @@ with st.sidebar:
 
     st.divider()
 
-    # [B] 收費牆邏輯
-    if st.session_state['is_pro']:
-        st.success("💎 PRO 版功能已解鎖 (無限使用)")
-    else:
-        remaining = 3 - st.session_state['usage_count']
-        st.info(f"✨ 免費額度：剩餘 **{remaining}** 次")
-        st.progress(st.session_state['usage_count'] / 3)
-        
-        if remaining == 0:
-            st.error("🔒 額度已用完，請解鎖")
-        
-        with st.expander("🔓 輸入序號解鎖 PRO 版"):
-            license_key = st.text_input("請輸入產品序號", type="password")
-            if st.button("驗證序號"):
-                if license_key == "VIP888": 
-                    st.session_state['is_pro'] = True
-                    st.rerun()
-                else:
-                    st.error("序號錯誤")
-            st.markdown("👉 **[點此購買序號 ($5)](https://gumroad.com)**")
+    # [B] 🔥 新增：打賞鼓勵區 (取代原本的收費牆)
+    st.subheader("☕ 鼓勵開發者")
+    st.markdown("如果這個工具幫你節省了時間，歡迎請我喝杯咖啡，支持我開發更多免費工具！")
+    
+    # 這裡放你的 Buy Me A Coffee 按鈕連結
+    # 請記得把 href 換成你自己的網址
+    st.markdown(
+        """
+        <a href="https://www.buymeacoffee.com/wangbear77" target="_blank">
+            <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" style="height: 40px !important;width: 150px !important;" >
+        </a>
+        """,
+        unsafe_allow_html=True
+    )
 
     st.divider()
     
-    # [C] 懶人樣板
+    # [C] 懶人樣板 (保留)
     st.write("⚡ **快速樣板 (點擊自動填寫)：**")
     if st.button("💰 個人記帳表"): st.session_state['user_prompt'] = "幫我做一個2025年個人記帳表。欄位：日期、類別、項目、金額、付款方式。請生成10筆範例。公式要求：計算本月總支出、分類小計。美化：標題深藍底白字，金額加$符號。"
     if st.button("📦 商品庫存表"): st.session_state['user_prompt'] = "幫我做一個庫存管理表。欄位：商品編號、名稱、進貨價、售價、庫存量、庫存總值(公式：進貨價*庫存量)。請生成10筆範例。美化：標題深綠底，金額加千分位。"
@@ -83,7 +74,7 @@ with st.sidebar:
 
     model_choice = st.selectbox("模型選擇", ["gemini-2.5-flash", "gemini-2.5-pro"])
 
-# --- 4. 核心邏輯：暴力清洗 + 自我修復 ---
+# --- 4. 核心邏輯：暴力清洗 + 自我修復 (維持 V4.7/V5.6 的穩定核心) ---
 def sanitize_code(code):
     """暴力清洗：強制刪除 AI 寫出的錯誤模組引用"""
     lines = code.split('\n')
@@ -169,7 +160,7 @@ def generate_and_fix_code(user_prompt, key, model_name):
 
 # --- 5. 主介面 ---
 
-# 🔥🔥🔥 V5.6 保證：好壞範例教學完整保留！🔥🔥🔥
+# 🔥🔥🔥 V6.0 保證：好壞範例教學完整保留！🔥🔥🔥
 with st.expander("💡 怎麼樣才能做出完美的表格？ (點我看秘訣)"):
     st.markdown("""
     **黃金許願公式：**
@@ -189,22 +180,18 @@ with st.expander("💡 怎麼樣才能做出完美的表格？ (點我看秘訣)
 # 使用 session_state 綁定輸入框
 user_input = st.text_area("請輸入需求 (或點擊左側快速樣板)：", value=st.session_state['user_prompt'], height=150, placeholder="例如：幫我做一個房東收租表...")
 
-# 🔥 判斷是否允許生成
+# 🔥 判斷是否允許生成 (只要有 Key 就可以，無限次)
 can_generate = False
 if sys_api_key:
-    if st.session_state['is_pro'] or st.session_state['usage_count'] < 3:
-        can_generate = True
+    can_generate = True
 
 if st.button("✨ 生成專業表格", type="primary", disabled=not can_generate):
     if not can_generate:
-        if not sys_api_key:
-            st.error("⚠️ 系統維護中 (未設定後台金鑰)")
-        else:
-            st.error("🔒 免費試用次數已用完！請在左側輸入序號解鎖。")
+        st.error("⚠️ 系統維護中 (未設定後台金鑰)")
     elif not user_input:
         st.warning("⚠️ 請輸入需求")
     else:
-        spinner_text = f"🤖 AI 正在製作中 (已啟動自我修復)..."
+        spinner_text = f"🤖 AI 正在製作中 (免費無限生成)..."
         with st.spinner(spinner_text):
             
             code, error_msg = generate_and_fix_code(user_input, sys_api_key, model_choice)
@@ -224,14 +211,8 @@ if st.button("✨ 生成專業表格", type="primary", disabled=not can_generate
                             file_name=file_name,
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                         )
-                        st.success("🎉 完成！(AI 確保了代碼無誤)")
+                        st.success("🎉 生成成功！如果覺得好用，歡迎請我喝杯咖啡 ☕")
                         
-                        # 🔥 V5.6 修正：移除 st.rerun()，改用文字提示
-                        if not st.session_state['is_pro']:
-                            st.session_state['usage_count'] += 1
-                            used = st.session_state['usage_count']
-                            st.info(f"✨ 已扣除 1 次額度 (目前使用 {used}/3 次)")
-                            
                     else:
                         st.error("生成失敗。")
                 except Exception as e:
@@ -244,4 +225,4 @@ if st.button("✨ 生成專業表格", type="primary", disabled=not can_generate
 
 # --- 6. 頁尾 ---
 st.divider()
-st.caption("Excel Generator V5.6 (Fixed Download Button)")
+st.caption("Excel Generator V6.0 (Donation Model)")
