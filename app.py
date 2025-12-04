@@ -30,6 +30,7 @@ st.markdown("不懂公式？不會排版？讓 AI 幫你寫一個 **「還不錯
 st.warning("""
 **⚠️ 使用前請詳閱：**
 * 這是輔助工具，適合生成 **「基礎到中等難度」** 的表格。
+* **太專業的需求** (如複雜連動、VBA) AI 可能會暈倒。
 * **可能有小 Bug**：建議下載後 **「人工檢查」** 公式。
 * **如果不滿意**：請調整描述再試一次 (AI 每次發揮都不太一樣)。
 """)
@@ -42,20 +43,16 @@ with st.sidebar:
     
     # 嘗試讀取後台 Secrets
     try:
-        # 情況 A: 有設定 API_KEYS 列表 (輪詢模式)
         if "API_KEYS" in st.secrets:
             keys = st.secrets["API_KEYS"]
             if isinstance(keys, list) and len(keys) > 0:
                 current_api_key = random.choice(keys)
-        
-        # 情況 B: 只有設定單一 GEMINI_API_KEY (單一模式)
         elif "GEMINI_API_KEY" in st.secrets:
             current_api_key = st.secrets["GEMINI_API_KEY"]
-            
     except FileNotFoundError:
-        pass # 本機沒有 secrets.toml，正常跳過
+        pass 
     except Exception:
-        pass # 其他錯誤跳過
+        pass 
 
     # 如果後台沒抓到 Key，顯示手動輸入框
     if not current_api_key:
@@ -65,9 +62,10 @@ with st.sidebar:
 
     st.divider()
 
-    # 打賞區 (完整保留)
+    # 打賞區
     st.subheader("☕ 鼓勵開發者")
     st.markdown("如果這個工具幫你省了時間，歡迎請我喝杯咖啡！")
+    
     st.markdown(
         """
         <a href="https://www.buymeacoffee.com/wangbear77" target="_blank">
@@ -79,7 +77,7 @@ with st.sidebar:
 
     st.divider()
     
-    # 懶人樣板 (完整保留)
+    # 懶人樣板
     st.write("⚡ **快速樣板 (點擊填寫)：**")
     if st.button("💰 個人記帳表"): st.session_state['user_prompt'] = "幫我做一個2025年個人記帳表。欄位：日期、類別、項目、金額、付款方式。請生成10筆範例。公式要求：計算本月總支出、分類小計。美化：標題深藍底白字，金額加$符號。"
     if st.button("📦 商品庫存表"): st.session_state['user_prompt'] = "幫我做一個庫存管理表。欄位：商品編號、名稱、進貨價、售價、庫存量、庫存總值(公式：進貨價*庫存量)。請生成10筆範例。美化：標題深綠底，金額加千分位。"
@@ -87,7 +85,7 @@ with st.sidebar:
 
     model_choice = st.selectbox("模型選擇", ["gemini-2.5-flash", "gemini-2.5-pro"])
 
-# --- 4. 核心邏輯 (加入 V6.3 的公式防呆指令) ---
+# --- 4. 核心邏輯 (加入 V6.4 公式強制鎖定) ---
 def sanitize_code(code):
     lines = code.split('\n')
     cleaned_lines = []
@@ -104,7 +102,7 @@ def generate_and_fix_code(user_prompt, key, model_name):
         safety_settings = {HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE, HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE, HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE, HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE}
         model = genai.GenerativeModel(model_name, generation_config=genai.types.GenerationConfig(max_output_tokens=8000, temperature=0.0)) 
         
-        # 🔥 V6.3 唯一修改點：更新 Prompt，強制使用 ws.cell() 寫法避免語法錯誤
+        # 🔥 V6.4 修正：強制 AI 只輸出公式字串，不准先計算結果
         base_prompt = f"""
         你是一位 Python Excel 自動化專家。需求："{user_prompt}"
         請寫一段 **完整且可執行** 的 Python 代碼。
@@ -113,11 +111,11 @@ def generate_and_fix_code(user_prompt, key, model_name):
         1. **Imports**：務必包含 io, random, datetime, pandas, openpyxl 相關模組。
         2. **核心邏輯**：建立 wb = Workbook()，填入資料與公式，美化樣式。
         
-        3. **公式寫法 (CRITICAL - 絕對遵守)**：
-           - **嚴禁** 使用 `ws['A1'] = ...` 的方式寫入數據或公式。
-           - **必須** 使用 `ws.cell(row=i, column=j, value=...)` 的方式。
-           - 範例：`ws.cell(row=row_idx, column=5, value=f'=C{{row_idx}}*D{{row_idx}}')`
-           - 這種寫法最不容易出錯，請務必遵守。
+        3. **公式寫法 (CRITICAL)**：
+           - **絕對禁止** 在 Python 代碼中算出結果 (例如: amount = 500 * 1.05)。
+           - 所有的 Excel 公式字串 **必須以等於號 (=) 開頭**。
+           - 請使用 `ws.cell(row=i, column=j, value=f'=...')` 的方式寫入公式。
+           - **最終檢查**：在儲存前，檢查所有儲存格，如果公式內容是像 SUM, IF, PMT 開頭但沒有等號，請自動補上。
         
         4. **禁止模組**：不要使用 openpyxl.formatting 或 conditional_formatting (請用迴圈變色)。
         5. **關鍵步驟**：最後請將檔案儲存到變數 `output_buffer = io.BytesIO()`，並 `wb.save(output_buffer)`。
@@ -147,16 +145,15 @@ def generate_and_fix_code(user_prompt, key, model_name):
                 else: raise Exception("代碼執行成功但未產生 output_buffer 變數")
             except Exception as e:
                 error_msg = str(e)
-                print(f"第 {attempt+1} 次嘗試失敗: {error_msg}")
-                current_prompt += f"\n\n\n【系統回報】：程式碼執行失敗，錯誤訊息：{error_msg}。\n請修正代碼(確保使用 ws.cell().value 寫法)並重新輸出。"
+                print(f"Retry {attempt+1}: {error_msg}")
+                # 錯誤回報：特別強調要寫 =
+                current_prompt += f"\n\n【系統回報】：程式碼執行失敗，錯誤訊息：{error_msg}。\n請修正代碼，**務必確保公式字串以等於號 (=) 開頭**，然後重新輸出。"
                 
         return None, "AI 嘗試修復了 3 次但仍然失敗，請嘗試簡化您的需求。"
     except Exception as e:
         return None, str(e)
 
 # --- 5. 主介面 ---
-
-# 🔥 V6.2 的教學完整保留在此！
 with st.expander("💡 怎麼樣才能做出完美的表格？ (點我看秘訣)"):
     st.markdown("""
     **黃金許願公式：**
@@ -181,11 +178,9 @@ if st.button("✨ 生成專業表格", type="primary"):
     elif not user_input:
         st.warning("⚠️ 請輸入需求")
     else:
-        spinner_text = f"🤖 AI 正在努力製作中 (可能會有點慢，請耐心等待)..."
+        spinner_text = f"🤖 AI 正在製作中 (公式強力校正模式)..."
         with st.spinner(spinner_text):
-            
             code, error_msg = generate_and_fix_code(user_input, current_api_key, model_choice)
-            
             if code:
                 try:
                     local_vars = {}
@@ -194,15 +189,8 @@ if st.button("✨ 生成專業表格", type="primary"):
                     if 'output_buffer' in local_vars:
                         excel_data = local_vars['output_buffer']
                         file_name = f"excel_gen_{datetime.datetime.now().strftime('%H%M%S')}.xlsx"
-                        
-                        st.download_button(
-                            label="📥 下載 Excel (.xlsx)",
-                            data=excel_data,
-                            file_name=file_name,
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                        )
-                        st.success("🎉 生成成功！如果不滿意，可以修改描述再試一次喔。")
-                        st.info("💡 覺得好用嗎？歡迎請我喝杯咖啡支持開發！")
+                        st.download_button(label="📥 下載 Excel (.xlsx)", data=excel_data, file_name=file_name, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                        st.success("🎉 完成！請檢查 Excel 內容。")
                     else: st.error("生成失敗。")
                 except Exception as e:
                     st.error(f"錯誤：{e}")
@@ -213,4 +201,4 @@ if st.button("✨ 生成專業表格", type="primary"):
 
 # --- 6. 頁尾 ---
 st.divider()
-st.caption("Excel Rookie Savior V6.3 (Stable Syntax)")
+st.caption("Excel Rookie Savior V6.4 (Final Formula Lock)")
